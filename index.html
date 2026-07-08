@@ -1,0 +1,746 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BESS Discovery — Carte des opportunités</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+<style>
+  :root {
+    --navy: #1F3864;
+    --navy-light: #2c4a7c;
+    --gold: #c9a100;
+    --bg: #f4f6f9;
+    --border: #dbe1ea;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; font-family: -apple-system, "Segoe UI", Arial, sans-serif; color: #222; }
+  #app { display: flex; height: 100vh; }
+  #sidebar {
+    width: 340px; min-width: 340px; background: #fff; border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; overflow-y: auto;
+  }
+  #sidebar h1 { font-size: 16px; color: var(--navy); margin: 16px 16px 4px; }
+  #sidebar .subtitle { font-size: 12px; color: #667; margin: 0 16px 12px; }
+  .section { padding: 12px 16px; border-top: 1px solid var(--border); }
+  .section h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: #556; margin: 0 0 10px; }
+  .field { margin-bottom: 10px; }
+  .field label { display: block; font-size: 12.5px; color: #334; margin-bottom: 4px; }
+  .field .value { float: right; font-weight: 600; color: var(--navy); }
+  input[type=range] { width: 100%; accent-color: var(--navy); }
+  input[type=text], input[type=file], select {
+    width: 100%; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px;
+  }
+  .checks { display: flex; flex-direction: column; gap: 6px; max-height: 160px; overflow-y: auto; }
+  .checks label { display: flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: normal; }
+  #stats { padding: 12px 16px; background: var(--navy); color: #fff; }
+  #stats .big { font-size: 26px; font-weight: 700; }
+  #stats .small { font-size: 11.5px; opacity: .85; }
+  #dropzone {
+    margin: 16px; padding: 22px 12px; border: 2px dashed #b7c2d6; border-radius: 10px;
+    text-align: center; font-size: 13px; color: #667; cursor: pointer; background: #fafbfd;
+  }
+  #dropzone.drag { background: #eef3fb; border-color: var(--navy); }
+  #dropzone b { color: var(--navy); }
+  #fileLabel { font-size: 11.5px; color: #778; margin: 6px 16px 0; word-break: break-all; }
+  #map { flex: 1; }
+  .legend {
+    background: #fff; padding: 8px 12px; border-radius: 8px; box-shadow: 0 1px 6px rgba(0,0,0,.2);
+    font-size: 12px; line-height: 1.6;
+  }
+  .legend .swatch { display: inline-block; width: 11px; height: 11px; border-radius: 50%; margin-right: 6px; }
+  .popup-title { font-weight: 700; color: var(--navy); font-size: 14px; margin-bottom: 4px; }
+  .popup-row { font-size: 12.5px; margin: 2px 0; }
+  .popup-row b { color: #445; }
+  .popup-score {
+    display: inline-block; padding: 2px 8px; border-radius: 12px; color: #fff; font-weight: 700; font-size: 12px;
+  }
+  .popup-link { display: inline-block; margin-top: 6px; font-size: 12.5px; }
+  .fav-btn {
+    display: block; width: 100%; margin-top: 8px; padding: 6px; border: 1px solid var(--gold);
+    background: #fffbe8; color: #8a6d00; border-radius: 6px; font-size: 12.5px; cursor: pointer; font-weight: 600;
+  }
+  .fav-btn.is-fav { background: var(--gold); color: #fff; }
+  #empty-state {
+    display: flex; align-items: center; justify-content: center; height: 100%;
+    color: #8a94a6; font-size: 14px; text-align: center; padding: 40px;
+  }
+  button.reset {
+    width: 100%; padding: 8px; background: var(--navy); color: #fff; border: none; border-radius: 6px;
+    font-size: 12.5px; cursor: pointer; margin-top: 4px;
+  }
+  button.reset:hover { background: var(--navy-light); }
+  button.gold { background: var(--gold); }
+  button.gold:hover { background: #ab8a00; }
+  .fav-item {
+    display: flex; align-items: center; gap: 6px; padding: 6px 8px; border: 1px solid var(--border);
+    border-radius: 6px; margin-bottom: 6px; font-size: 12px; background: #fffdf5;
+  }
+  .fav-item .fav-name { flex: 1; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fav-item .fav-name:hover { color: var(--navy); text-decoration: underline; }
+  .fav-item .fav-remove { cursor: pointer; color: #b33; font-weight: 700; padding: 0 4px; }
+  .fav-empty { font-size: 12px; color: #889; }
+  .zone-eco-badge {
+    display: inline-block; padding: 1px 7px; border-radius: 10px; background: #1e7d34; color: #fff;
+    font-size: 11px; font-weight: 600; margin-left: 4px;
+  }
+  /* bascule site / poste : masque les filtres non pertinents */
+  .poste-only { display: none; }
+  body.poste-mode .poste-only { display: block; }
+  body.poste-mode .site-only { display: none; }
+  #map { position: relative; }
+  #spatialBanner {
+    position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 1000;
+    background: #1F3864; color: #fff; padding: 7px 14px; border-radius: 20px; font-size: 13px;
+    box-shadow: 0 2px 8px rgba(0,0,0,.3);
+  }
+  #spatialClear { margin-left: 10px; cursor: pointer; text-decoration: underline; opacity: .85; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="sidebar">
+    <h1>BESS Discovery</h1>
+    <p class="subtitle">Carte des opportunités foncières — France</p>
+    <div id="dropzone">
+      📂 Cliquez ou glissez ici le fichier<br><b>nouvelles_opportunites_AAAA-MM-JJ.xlsx</b>
+      <input type="file" id="fileInput" accept=".xlsx" style="display:none">
+    </div>
+    <div id="fileLabel"></div>
+
+    <div id="stats" style="display:none">
+      <div class="big" id="statCount">0</div>
+      <div class="small" id="statLabel">sites affichés</div>
+    </div>
+
+    <div class="section" id="controls" style="display:none">
+      <h2>Onglet</h2>
+      <div class="field">
+        <select id="sheetSelect"></select>
+      </div>
+    </div>
+
+    <div class="section" id="filters" style="display:none">
+      <h2>Filtres</h2>
+      <div class="field">
+        <label><span id="scoreLabel">Score minimum</span> <span class="value" id="scoreMinVal">0</span></label>
+        <input type="range" id="scoreMin" min="0" max="100" value="0" step="1">
+      </div>
+      <div class="field poste-only">
+        <label>Capacité min. au poste (MW) <span class="value" id="capaMinVal">0</span></label>
+        <input type="range" id="capaMin" min="0" max="50" value="0" step="1">
+      </div>
+      <div class="field site-only">
+        <label>Prix €/m² max estimé <span class="value" id="priceMaxVal">illimité</span></label>
+        <input type="range" id="priceMax" min="0" max="2000" value="2000" step="10">
+      </div>
+      <div class="field site-only">
+        <label>Prix total max. (€) <span class="value" id="priceTotalMaxVal">illimité</span></label>
+        <input type="range" id="priceTotalMax" min="0" max="1000000" value="1000000" step="10000">
+        <div style="display:flex; gap:6px; margin-top:6px;">
+          <button type="button" class="pricePreset" data-v="1000000"
+            style="flex:1; padding:5px 0; font-size:12px; border:1px solid var(--border); border-radius:6px; background:#fff; color:#222; cursor:pointer;">Tous</button>
+          <button type="button" class="pricePreset" data-v="300000"
+            style="flex:1; padding:5px 0; font-size:12px; border:1px solid var(--border); border-radius:6px; background:#fff; color:#222; cursor:pointer;">&lt;300k</button>
+          <button type="button" class="pricePreset" data-v="200000"
+            style="flex:1; padding:5px 0; font-size:12px; border:1px solid var(--border); border-radius:6px; background:#fff; color:#222; cursor:pointer;">&lt;200k</button>
+          <button type="button" class="pricePreset" data-v="150000"
+            style="flex:1; padding:5px 0; font-size:12px; border:1px solid var(--border); border-radius:6px; background:#fff; color:#222; cursor:pointer;">&lt;150k</button>
+        </div>
+      </div>
+      <div class="field site-only">
+        <label>Distance max au poste (km) <span class="value" id="distMaxVal">illimité</span></label>
+        <input type="range" id="distMax" min="0" max="20" value="20" step="0.5">
+      </div>
+      <div class="field">
+        <label id="searchLabel">Recherche (commune, nom)</label>
+        <input type="text" id="searchBox" placeholder="ex: Rennes, friche...">
+      </div>
+      <div class="field site-only">
+        <label>Département</label>
+        <select id="deptSelect"><option value="">Tous</option></select>
+      </div>
+      <div class="field site-only">
+        <label>Sources</label>
+        <div class="checks" id="sourceChecks"></div>
+      </div>
+      <div class="field site-only">
+        <label><input type="checkbox" id="onlyZoneEco" style="width:auto"> <b>Zones éco uniquement</b> (ZA/ZI — PLU : UE, UI, UX, UY, UZ, AUx…)</label>
+      </div>
+      <div class="field site-only">
+        <label><input type="checkbox" id="onlyPluKnown" style="width:auto"> Uniquement zone PLU connue</label>
+      </div>
+      <div class="field site-only">
+        <label><input type="checkbox" id="excludeFlood" style="width:auto"> Exclure risque inondation (AZI)</label>
+      </div>
+      <button class="reset" id="resetBtn">Réinitialiser les filtres</button>
+    </div>
+
+    <div class="section" id="favSection">
+      <h2>⭐ Mes favoris (<span id="favCount">0</span>)</h2>
+      <div class="field">
+        <label><input type="checkbox" id="onlyFavs" style="width:auto"> Afficher uniquement mes favoris</label>
+      </div>
+      <div id="favList"><div class="fav-empty">Aucun favori — cliquez sur ☆ dans la fiche d'un site.</div></div>
+      <button class="reset gold" id="exportFavs">Exporter les favoris (CSV)</button>
+    </div>
+  </div>
+  <div id="map">
+    <div id="spatialBanner" style="display:none">
+      📍 <span id="spatialBannerText"></span>
+      <span id="spatialClear">✕ tout revoir</span>
+    </div>
+    <div id="empty-state">Chargez un fichier <code>nouvelles_opportunites_*.xlsx</code> pour afficher la carte.</div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+<script src="https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script>
+let map = null;
+let clusterGroup = null;
+let allRows = [];        // lignes brutes de la feuille active
+let rowsById = new Map(); // id stable -> ligne
+let markersById = new Map();
+let workbook = null;
+
+const COL = {
+  nom: "Réf. / annonce", source: "Source", commune: "Commune (Dépt)", url: "Lien / URL",
+  prixEur: "Prix estimé (€) [DVF]", prixM2: "Prix €/m² estimé [DVF]", surface: "Surface (m²)",
+  lat: "Lat (°)", lon: "Lon (°)", poste: "Poste le plus proche", distPoste: "Distance (km)",
+  capacite: "Capacité poste (MW)", distHtb: "Ligne HTB proche (km)", pv: "Mutabilité PV",
+  pollution: "Pollution connue", pollutionOrigine: "Origine pollution", plu: "Zone PLU",
+  zoneEco: "Zone éco (UE/UI/UX)", inondation: "Risque inondation (AZI)",
+  proteges: "Espaces protégés / Natura 2000", score: "SCORE COMBINÉ",
+};
+// 2e volet : onglet "Postes (prospection)" — schéma différent
+const PCOL = {
+  poste: "Poste source", s3renr: "S3REnR", capacite: "Capacité dispo (MW)",
+  quotePart: "Quote-part (€/kW)", travaux: "Travaux RTE en attente", prixM2: "Prix €/m² local (méd.)",
+  nbSites: "Sites candidats < rayon", nbEco: "dont zone éco (ZA/ZI/UE)",
+  lat: "Lat", lon: "Lon", score: "SCORE PROSPECTION",
+};
+let currentMode = 'site';   // 'site' ou 'poste'
+let spatialFilter = null;   // {lat, lon, km} — "voir les sites autour d'un poste"
+
+function isPosteSheet(rows) {
+  return rows.length > 0 && (PCOL.score in rows[0]) && (PCOL.poste in rows[0]);
+}
+function getLat(row) { return parseFloat(currentMode === 'poste' ? row[PCOL.lat] : row[COL.lat]); }
+function getLon(row) { return parseFloat(currentMode === 'poste' ? row[PCOL.lon] : row[COL.lon]); }
+function getScore(row) { return parseFloat(currentMode === 'poste' ? row[PCOL.score] : row[COL.score]) || 0; }
+function getName(row) { return (currentMode === 'poste' ? row[PCOL.poste] : row[COL.nom]) || 'Site'; }
+
+function haversineKm(la1, lo1, la2, lo2) {
+  const R = 6371, r = Math.PI / 180;
+  const d = Math.sin((la2 - la1) * r / 2) ** 2 +
+    Math.cos(la1 * r) * Math.cos(la2 * r) * Math.sin((lo2 - lo1) * r / 2) ** 2;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(d)));
+}
+
+// ------------------------------------------------------------------ favoris
+const FAV_KEY = 'bess_favorites_v1';
+let favorites = {};
+try { favorites = JSON.parse(localStorage.getItem(FAV_KEY) || '{}'); } catch (e) { favorites = {}; }
+
+function rowId(row) {
+  // préfixe le type pour ne pas mélanger favoris "site" et "poste"
+  if (PCOL.score in row) return `P|${row[PCOL.lat]}|${row[PCOL.lon]}|${row[PCOL.poste]}`;
+  return `${row[COL.lat]}|${row[COL.lon]}|${row[COL.nom]}`;
+}
+function saveFavs() { localStorage.setItem(FAV_KEY, JSON.stringify(favorites)); }
+
+window.toggleFav = function (idEnc) {
+  const id = decodeURIComponent(idEnc);
+  if (favorites[id]) {
+    delete favorites[id];
+  } else {
+    const row = rowsById.get(id);
+    if (!row) return;
+    favorites[id] = { savedAt: new Date().toISOString(), row: row };
+  }
+  saveFavs();
+  renderFavList();
+  const marker = markersById.get(id);
+  if (marker) {
+    styleMarker(marker, marker.options._score, !!favorites[id]);
+    marker.setPopupContent(popupHtml(rowsById.get(id)));
+  }
+  if (document.getElementById('onlyFavs').checked) renderMarkers();
+};
+
+window.zoomFav = function (idEnc) {
+  const id = decodeURIComponent(idEnc);
+  const fav = favorites[id];
+  if (!fav || !map) return;
+  const r = fav.row;
+  const lat = parseFloat((PCOL.score in r) ? r[PCOL.lat] : r[COL.lat]);
+  const lon = parseFloat((PCOL.score in r) ? r[PCOL.lon] : r[COL.lon]);
+  if (!Number.isFinite(lat)) return;
+  map.setView([lat, lon], 16);
+  const marker = markersById.get(id);
+  if (marker) setTimeout(() => marker.openPopup(), 300);
+};
+
+window.removeFav = function (idEnc) {
+  const id = decodeURIComponent(idEnc);
+  delete favorites[id];
+  saveFavs();
+  renderFavList();
+  const marker = markersById.get(id);
+  if (marker) {
+    styleMarker(marker, marker.options._score, false);
+    const row = rowsById.get(id);
+    if (row) marker.setPopupContent(popupHtml(row));
+  }
+  if (document.getElementById('onlyFavs') && document.getElementById('onlyFavs').checked) renderMarkers();
+};
+
+function renderFavList() {
+  const ids = Object.keys(favorites);
+  document.getElementById('favCount').textContent = ids.length;
+  const list = document.getElementById('favList');
+  if (!ids.length) {
+    list.innerHTML = '<div class="fav-empty">Aucun favori — cliquez sur ☆ dans la fiche d\'un site.</div>';
+    return;
+  }
+  list.innerHTML = ids.map(id => {
+    const r = favorites[id].row;
+    const idEnc = encodeURIComponent(id);
+    const isPoste = (PCOL.score in r);
+    const icon = isPoste ? '🔌' : '⭐';
+    const name = isPoste ? (r[PCOL.poste] || 'Poste') : (r[COL.nom] || 'Site');
+    const sub = isPoste ? (num(r[PCOL.capacite]) != null ? r[PCOL.capacite] + ' MW' : 'poste') : (r[COL.commune] || '');
+    return `<div class="fav-item">
+      <span class="fav-name" title="${String(name).replace(/"/g, '&quot;')} — ${sub}"
+            onclick="window.zoomFav('${idEnc}')">${icon} ${name} <span style="color:#889">· ${sub}</span></span>
+      <span class="fav-remove" title="Retirer" onclick="window.removeFav('${idEnc}')">✕</span>
+    </div>`;
+  }).join('');
+}
+
+function exportFavsCsv() {
+  const ids = Object.keys(favorites);
+  if (!ids.length) { alert('Aucun favori à exporter.'); return; }
+  // colonnes = union de toutes les clés présentes dans les favoris (sites ET postes),
+  // pour que les deux types s'exportent complètement dans un même CSV.
+  const colSet = [];
+  for (const id of ids) {
+    for (const k of Object.keys(favorites[id].row)) if (!colSet.includes(k)) colSet.push(k);
+  }
+  const cols = ['Type', ...colSet];
+  const esc = (v) => '"' + String(v === undefined || v === null ? '' : v).replace(/"/g, '""') + '"';
+  const lines = [cols.map(esc).join(';')];
+  for (const id of ids) {
+    const r = favorites[id].row;
+    const type = (PCOL.score in r) ? 'Poste' : 'Site';
+    lines.push([esc(type), ...colSet.map(c => esc(r[c]))].join(';'));
+  }
+  const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'favoris_bess_' + new Date().toISOString().slice(0, 10) + '.csv';
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+// ------------------------------------------------------------------ zones éco
+// Codes PLU à vocation économique/industrielle : UE, UI, UX, UY, UZ et
+// variantes "à urbaniser" (AUe, 1AUx…) + mots-clés du libellé long.
+// Correspond à ce qu'on appelle couramment ZA (zone d'activités) / ZI (zone industrielle).
+const ZONE_ECO_CODE_RE = /^\d?\s*A?U\s*[EIXYZ]/i;
+const ZONE_ECO_KEYWORDS = /activit|écono|econo|industri|artisan|commerc/i;
+
+function isZoneEco(row) {
+  if (String(row[COL.zoneEco] || '').toLowerCase().startsWith('oui')) return true;
+  const z = String(row[COL.plu] || '');
+  if (!z) return false;
+  const code = z.split('—')[0].trim();
+  return ZONE_ECO_CODE_RE.test(code) || ZONE_ECO_KEYWORDS.test(z);
+}
+
+// ------------------------------------------------------------------ carte
+function scoreColor(score) {
+  const s = Math.max(0, Math.min(100, Number(score) || 0));
+  const hue = (s / 100) * 120; // 0=rouge, 120=vert
+  return `hsl(${hue}, 75%, 45%)`;
+}
+
+function styleMarker(marker, score, isFav) {
+  marker.setStyle({
+    radius: isFav ? 9 : 6,
+    fillColor: scoreColor(score),
+    color: isFav ? '#c9a100' : '#fff',
+    weight: isFav ? 3 : 1,
+    fillOpacity: 0.9,
+  });
+}
+
+function initMap() {
+  map = L.map('map').setView([46.6, 2.2], 6);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; OpenStreetMap contributors', maxZoom: 19,
+  }).addTo(map);
+  clusterGroup = L.markerClusterGroup({
+    disableClusteringAtZoom: 16,
+    maxClusterRadius: 50,
+    iconCreateFunction: function (cluster) {
+      const markers = cluster.getAllChildMarkers();
+      const avg = markers.reduce((s, m) => s + (m.options._score || 0), 0) / markers.length;
+      const color = scoreColor(avg);
+      const count = cluster.getChildCount();
+      const size = count < 10 ? 32 : count < 100 ? 40 : 48;
+      return L.divIcon({
+        html: `<div style="background:${color};width:${size}px;height:${size}px;border-radius:50%;
+               display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;
+               font-size:12px;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4)">${count}</div>`,
+        className: '', iconSize: [size, size],
+      });
+    },
+  });
+  map.addLayer(clusterGroup);
+
+  const legend = L.control({ position: 'bottomright' });
+  legend.onAdd = function () {
+    const div = L.DomUtil.create('div', 'legend');
+    div.innerHTML = `<b>Score combiné</b><br>
+      <span class="swatch" style="background:${scoreColor(90)}"></span> 80-100 (excellent)<br>
+      <span class="swatch" style="background:${scoreColor(65)}"></span> 50-80 (correct)<br>
+      <span class="swatch" style="background:${scoreColor(30)}"></span> 0-50 (faible)<br>
+      <span class="swatch" style="background:#fff;border:3px solid #c9a100"></span> favori`;
+    return div;
+  };
+  legend.addTo(map);
+}
+
+function num(v) {
+  const n = parseFloat(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function popupHtml(row) {
+  const id = rowId(row);
+  const idEnc = encodeURIComponent(id);
+  const isFav = !!favorites[id];
+  const fmt = (v, suffix = '') => (v === undefined || v === null || v === '' ? '—' : v + suffix);
+  const favBtn = `<button class="fav-btn ${isFav ? 'is-fav' : ''}" onclick="window.toggleFav('${idEnc}')">
+      ${isFav ? '★ Retirer des favoris' : '☆ Ajouter aux favoris'}</button>`;
+
+  if (PCOL.score in row) {  // ---- fiche POSTE ----
+    const score = num(row[PCOL.score]) || 0;
+    return `
+      <div class="popup-title">🔌 ${row[PCOL.poste] || 'Poste'}</div>
+      <div class="popup-row">S3REnR : ${row[PCOL.s3renr] || '—'}</div>
+      <div class="popup-row"><span class="popup-score" style="background:${scoreColor(score)}">Prospection ${score.toFixed(0)}</span></div>
+      <div class="popup-row"><b>Capacité dispo :</b> ${fmt(row[PCOL.capacite], ' MW')}</div>
+      <div class="popup-row"><b>Quote-part :</b> ${fmt(row[PCOL.quotePart], ' €/kW')}</div>
+      <div class="popup-row"><b>Travaux RTE :</b> ${fmt(row[PCOL.travaux])}</div>
+      <div class="popup-row"><b>Prix €/m² local :</b> ${fmt(row[PCOL.prixM2], ' €/m²')}</div>
+      <div class="popup-row"><b>Sites candidats &lt; rayon :</b> ${fmt(row[PCOL.nbSites])} (dont ${fmt(row[PCOL.nbEco])} en zone éco)</div>
+      <button class="fav-btn" style="border-color:#1F3864;background:#eef3fb;color:#1F3864"
+        onclick="window.voirSitesAutour(${getLat(row)},${getLon(row)},'${encodeURIComponent(row[PCOL.poste] || '')}')">
+        📍 Voir les sites autour (5 km)</button>
+      ${favBtn}
+    `;
+  }
+  // ---- fiche SITE ----
+  const score = num(row[COL.score]) || 0;
+  const url = row[COL.url];
+  const ecoBadge = isZoneEco(row) ? '<span class="zone-eco-badge">Zone éco</span>' : '';
+  return `
+    <div class="popup-title">${row[COL.nom] || 'Site'}${ecoBadge}</div>
+    <div class="popup-row">${row[COL.commune] || ''} · ${row[COL.source] || ''}</div>
+    <div class="popup-row"><span class="popup-score" style="background:${scoreColor(score)}">Score ${score.toFixed(1)}</span></div>
+    <div class="popup-row"><b>Prix estimé :</b> ${fmt(row[COL.prixEur], ' €')} (${fmt(row[COL.prixM2], ' €/m²')})</div>
+    <div class="popup-row"><b>Surface :</b> ${fmt(row[COL.surface], ' m²')}</div>
+    <div class="popup-row"><b>Poste proche :</b> ${fmt(row[COL.poste])} — ${fmt(row[COL.distPoste], ' km')}</div>
+    <div class="popup-row"><b>Capacité poste :</b> ${fmt(row[COL.capacite], ' MW')}</div>
+    <div class="popup-row"><b>Ligne HTB proche :</b> ${fmt(row[COL.distHtb], ' km')}</div>
+    <div class="popup-row"><b>Mutabilité PV :</b> ${fmt(row[COL.pv])}</div>
+    <div class="popup-row"><b>Pollution :</b> ${fmt(row[COL.pollution])} ${row[COL.pollutionOrigine] ? '(' + row[COL.pollutionOrigine] + ')' : ''}</div>
+    <div class="popup-row"><b>Zone PLU :</b> ${fmt(row[COL.plu])}</div>
+    <div class="popup-row"><b>Risque inondation :</b> ${fmt(row[COL.inondation])}</div>
+    <div class="popup-row"><b>Espaces protégés :</b> ${fmt(row[COL.proteges])}</div>
+    ${url ? `<a class="popup-link" href="${url}" target="_blank" rel="noopener">Voir la fiche source →</a>` : ''}
+    <button class="fav-btn ${isFav ? 'is-fav' : ''}" onclick="window.toggleFav('${idEnc}')">
+      ${isFav ? '★ Retirer des favoris' : '☆ Ajouter aux favoris'}</button>
+  `;
+}
+
+function extractDept(communeField) {
+  const m = String(communeField || '').match(/\(([^)]+)\)\s*$/);
+  return m ? m[1] : '';
+}
+
+function populateFilterOptions(rows) {
+  const deptSelect = document.getElementById('deptSelect');
+  const depts = Array.from(new Set(rows.map(r => extractDept(r[COL.commune])).filter(Boolean))).sort();
+  deptSelect.innerHTML = '<option value="">Tous (' + depts.length + ' départements)</option>' +
+    depts.map(d => `<option value="${d}">${d}</option>`).join('');
+
+  const sources = Array.from(new Set(rows.map(r => r[COL.source]).filter(Boolean))).sort();
+  const sourceChecks = document.getElementById('sourceChecks');
+  sourceChecks.innerHTML = sources.map((s) =>
+    `<label><input type="checkbox" class="srcCheck" value="${s}" checked> ${s}</label>`).join('');
+}
+
+function currentFilters() {
+  const checked = Array.from(document.querySelectorAll('.srcCheck:checked')).map(c => c.value);
+  return {
+    scoreMin: Number(document.getElementById('scoreMin').value),
+    priceMax: Number(document.getElementById('priceMax').value),
+    priceTotalMax: Number(document.getElementById('priceTotalMax').value),
+    distMax: Number(document.getElementById('distMax').value),
+    capaMin: Number(document.getElementById('capaMin').value),
+    search: document.getElementById('searchBox').value.trim().toLowerCase(),
+    dept: document.getElementById('deptSelect').value,
+    sources: checked,
+    onlyZoneEco: document.getElementById('onlyZoneEco').checked,
+    onlyPlu: document.getElementById('onlyPluKnown').checked,
+    excludeFlood: document.getElementById('excludeFlood').checked,
+    onlyFavs: document.getElementById('onlyFavs').checked,
+  };
+}
+
+function rowPasses(row, f) {
+  if (f.onlyFavs && !favorites[rowId(row)]) return false;
+  if (getScore(row) < f.scoreMin) return false;
+
+  if (currentMode === 'poste') {
+    const capa = num(row[PCOL.capacite]);
+    if (f.capaMin > 0 && (capa === null || capa < f.capaMin)) return false;
+    if (f.search && !String(row[PCOL.poste] || '').toLowerCase().includes(f.search)) return false;
+    return true;
+  }
+
+  // mode site
+  if (spatialFilter) {
+    const d = haversineKm(spatialFilter.lat, spatialFilter.lon, getLat(row), getLon(row));
+    if (d > spatialFilter.km) return false;
+  }
+  const priceM2 = num(row[COL.prixM2]);
+  if (f.priceMax < 2000 && priceM2 !== null && priceM2 > f.priceMax) return false;
+  const priceTot = num(row[COL.prixEur]);
+  if (f.priceTotalMax < 1000000 && (priceTot === null || priceTot > f.priceTotalMax)) return false;
+  const dist = num(row[COL.distPoste]);
+  if (f.distMax < 20 && dist !== null && dist > f.distMax) return false;
+  if (f.dept && extractDept(row[COL.commune]) !== f.dept) return false;
+  if (f.sources.length && !f.sources.includes(row[COL.source])) return false;
+  if (f.onlyZoneEco && !isZoneEco(row)) return false;
+  if (f.onlyPlu && !row[COL.plu]) return false;
+  if (f.excludeFlood && String(row[COL.inondation] || '').startsWith('oui')) return false;
+  if (f.search) {
+    const hay = `${row[COL.nom] || ''} ${row[COL.commune] || ''}`.toLowerCase();
+    if (!hay.includes(f.search)) return false;
+  }
+  return true;
+}
+
+function renderMarkers() {
+  clusterGroup.clearLayers();
+  markersById.clear();
+  const f = currentFilters();
+  let count = 0;
+  const markers = [];
+  for (const row of allRows) {
+    const lat = getLat(row), lon = getLon(row);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+    if (!rowPasses(row, f)) continue;
+    const score = getScore(row);
+    const id = rowId(row);
+    const isFav = !!favorites[id];
+    const isPoste = currentMode === 'poste';
+    const marker = L.circleMarker([lat, lon], { _score: score });
+    marker.setStyle({
+      radius: isFav ? 9 : (isPoste ? 7 : 6),
+      fillColor: scoreColor(score),
+      color: isFav ? '#c9a100' : (isPoste ? '#1F3864' : '#fff'),
+      weight: isFav ? 3 : (isPoste ? 2 : 1),
+      fillOpacity: 0.9,
+    });
+    marker.bindPopup(popupHtml(row), { maxWidth: 320 });
+    marker.on('popupopen', () => marker.setPopupContent(popupHtml(row)));
+    markersById.set(id, marker);
+    markers.push(marker);
+    count++;
+  }
+  clusterGroup.addLayers(markers);
+  document.getElementById('statCount').textContent = count.toLocaleString('fr-FR');
+  document.getElementById('statLabel').textContent = currentMode === 'poste' ? 'postes affichés' : 'sites affichés';
+}
+
+// bascule vers les sites et restreint au rayon autour d'un poste
+window.voirSitesAutour = function (lat, lon, nameEnc) {
+  const sitesSheet = workbook.SheetNames.includes('Toutes (classées)') ? 'Toutes (classées)'
+    : workbook.SheetNames.find(n => !isPosteSheet(XLSX.utils.sheet_to_json(workbook.Sheets[n], { defval: '' })));
+  if (!sitesSheet) return;
+  spatialFilter = { lat, lon, km: 5 };
+  document.getElementById('sheetSelect').value = sitesSheet;
+  loadSheet(sitesSheet);
+  map.setView([lat, lon], 13);
+  document.getElementById('spatialBanner').style.display = 'block';
+  document.getElementById('spatialBannerText').textContent =
+    'Sites à moins de 5 km de ' + decodeURIComponent(nameEnc);
+};
+
+function clearSpatialFilter() {
+  spatialFilter = null;
+  document.getElementById('spatialBanner').style.display = 'none';
+  renderMarkers();
+}
+
+function loadSheet(name) {
+  const ws = workbook.Sheets[name];
+  allRows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+  currentMode = isPosteSheet(allRows) ? 'poste' : 'site';
+  document.body.classList.toggle('poste-mode', currentMode === 'poste');
+  rowsById.clear();
+  for (const row of allRows) rowsById.set(rowId(row), row);
+  populateFilterOptions(allRows);
+  renderMarkers();
+}
+
+// Traite un classeur (ArrayBuffer) déjà en mémoire — commun au glisser-déposer
+// (FileReader) et au chargement automatique depuis une URL (fetch).
+function loadWorkbook(data, sourceLabel) {
+  workbook = XLSX.read(data, { type: 'array' });
+  if (sourceLabel) document.getElementById('fileLabel').textContent = sourceLabel;
+  if (!map) {
+    const es = document.getElementById('empty-state');
+    if (es) es.remove();  // retire seulement le message d'accueil (préserve la bannière spatiale)
+    initMap();
+  }
+  const sheetSelect = document.getElementById('sheetSelect');
+  sheetSelect.innerHTML = workbook.SheetNames
+    .filter(n => workbook.Sheets[n]['!ref'])
+    .map(n => `<option value="${n}">${n}</option>`).join('');
+  // "Toutes (classées)" par défaut si présent, sinon la 1re feuille
+  const preferred = workbook.SheetNames.includes('Toutes (classées)') ? 'Toutes (classées)' : workbook.SheetNames[0];
+  sheetSelect.value = preferred;
+  document.getElementById('stats').style.display = 'block';
+  document.getElementById('controls').style.display = 'block';
+  document.getElementById('filters').style.display = 'block';
+  loadSheet(preferred);
+}
+
+function handleFile(file) {
+  const reader = new FileReader();
+  reader.onload = (e) => loadWorkbook(e.target.result, file.name);
+  reader.readAsArrayBuffer(file);
+}
+
+// Charge un dataset directement depuis une URL (GitHub Pages, ?data=<url>, ou
+// le latest.xlsx co-hébergé). Renvoie true si OK, false sinon (le glisser-
+// déposer reste disponible en repli).
+async function loadFromUrl(url, label) {
+  try {
+    const res = await fetch(url, { cache: 'no-store' });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    loadWorkbook(await res.arrayBuffer(), label || decodeURIComponent(url.split('/').pop().split('?')[0]));
+    return true;
+  } catch (err) {
+    console.warn('Chargement auto depuis ' + url + ' échoué : ' + err.message);
+    return false;
+  }
+}
+
+document.getElementById('dropzone').addEventListener('click', () => document.getElementById('fileInput').click());
+document.getElementById('fileInput').addEventListener('change', (e) => {
+  if (e.target.files[0]) handleFile(e.target.files[0]);
+});
+['dragover', 'dragleave', 'drop'].forEach(evt => {
+  document.getElementById('dropzone').addEventListener(evt, (e) => {
+    e.preventDefault();
+    document.getElementById('dropzone').classList.toggle('drag', evt === 'dragover');
+    if (evt === 'drop' && e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+  });
+});
+document.getElementById('sheetSelect').addEventListener('change', (e) => {
+  clearSpatialFilter();  // change d'onglet = on annule le zoom "autour d'un poste"
+  loadSheet(e.target.value);
+  // libellés adaptés au mode
+  document.getElementById('scoreLabel').textContent = currentMode === 'poste' ? 'Score prospection min.' : 'Score minimum';
+  document.getElementById('searchLabel').textContent = currentMode === 'poste' ? 'Recherche (nom du poste)' : 'Recherche (commune, nom)';
+});
+document.getElementById('exportFavs').addEventListener('click', exportFavsCsv);
+document.getElementById('spatialClear').addEventListener('click', clearSpatialFilter);
+
+// synchronise le libellé « Prix total max. » + l'état actif des boutons preset
+function updatePriceTotalLabel() {
+  const v = Number(document.getElementById('priceTotalMax').value);
+  document.getElementById('priceTotalMaxVal').textContent =
+    v >= 1000000 ? 'illimité' : '≤ ' + (v / 1000).toLocaleString('fr-FR') + 'k €';
+  document.querySelectorAll('.pricePreset').forEach(b => {
+    const on = Number(b.dataset.v) === v;
+    b.style.background = on ? 'var(--navy)' : '#fff';
+    b.style.color = on ? '#fff' : '#222';
+  });
+}
+
+['scoreMin', 'capaMin', 'priceMax', 'priceTotalMax', 'distMax', 'searchBox', 'deptSelect', 'onlyZoneEco', 'onlyPluKnown', 'excludeFlood', 'onlyFavs'].forEach(id => {
+  document.getElementById(id).addEventListener('input', () => {
+    document.getElementById('scoreMinVal').textContent = document.getElementById('scoreMin').value;
+    document.getElementById('capaMinVal').textContent = document.getElementById('capaMin').value;
+    const pm = Number(document.getElementById('priceMax').value);
+    document.getElementById('priceMaxVal').textContent = pm >= 2000 ? 'illimité' : pm + ' €/m²';
+    const dm = Number(document.getElementById('distMax').value);
+    document.getElementById('distMaxVal').textContent = dm >= 20 ? 'illimité' : dm + ' km';
+    updatePriceTotalLabel();
+    if (map) renderMarkers();
+  });
+});
+// boutons de seuil de prix total (>150k, >200k, >300k, Tous)
+document.querySelectorAll('.pricePreset').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.getElementById('priceTotalMax').value = btn.dataset.v;
+    updatePriceTotalLabel();
+    if (map) renderMarkers();
+  });
+});
+document.body.addEventListener('change', (e) => { if (e.target.classList.contains('srcCheck')) renderMarkers(); });
+
+document.getElementById('resetBtn').addEventListener('click', () => {
+  document.getElementById('scoreMin').value = 0;
+  document.getElementById('capaMin').value = 0;
+  document.getElementById('priceMax').value = 2000;
+  document.getElementById('priceTotalMax').value = 1000000;
+  document.getElementById('distMax').value = 20;
+  document.getElementById('searchBox').value = '';
+  document.getElementById('deptSelect').value = '';
+  document.getElementById('onlyZoneEco').checked = false;
+  document.getElementById('onlyPluKnown').checked = false;
+  document.getElementById('excludeFlood').checked = false;
+  document.getElementById('onlyFavs').checked = false;
+  document.querySelectorAll('.srcCheck').forEach(c => c.checked = true);
+  document.getElementById('scoreMinVal').textContent = '0';
+  document.getElementById('capaMinVal').textContent = '0';
+  document.getElementById('priceMaxVal').textContent = 'illimité';
+  document.getElementById('distMaxVal').textContent = 'illimité';
+  updatePriceTotalLabel();
+  clearSpatialFilter();
+  renderMarkers();
+});
+
+// favoris chargés depuis localStorage : visibles dès l'ouverture, même sans fichier
+renderFavList();
+
+// Chargement AUTOMATIQUE au démarrage — plus besoin de glisser-déposer :
+//  1) ?data=<url>  → dataset explicite (permet de partager un lien vers un jeu précis)
+//  2) sinon latest.xlsx co-hébergé (le dernier build publié sur GitHub Pages)
+// En cas d'échec (aucun dataset publié, ouverture en local file://…), la
+// dropzone reste affichée pour un chargement manuel.
+(function autoload() {
+  const explicit = new URLSearchParams(location.search).get('data');
+  loadFromUrl(explicit || 'latest.xlsx').then(ok => {
+    if (!ok && explicit) {
+      const es = document.getElementById('empty-state');
+      if (es) es.textContent = 'Échec du chargement de ' + explicit + ' — glissez un fichier .xlsx à la place.';
+    }
+  });
+})();
+</script>
+</body>
+</html>

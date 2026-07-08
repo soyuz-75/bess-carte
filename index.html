@@ -167,7 +167,14 @@
         <div class="checks" id="sourceChecks"></div>
       </div>
       <div class="field site-only">
-        <label><input type="checkbox" id="onlyZoneEco" style="width:auto"> <b>Zones éco uniquement</b> (ZA/ZI — PLU : UE, UI, UX, UY, UZ, AUx…)</label>
+        <label>Zonage PLU</label>
+        <div class="checks" id="zoningChecks">
+          <label><input type="checkbox" class="zonCheck" value="eco" checked style="width:auto"> <b>Zone éco</b> (ZA/ZI — UE, UX, UY, UZ, AUx…)</label>
+          <label><input type="checkbox" class="zonCheck" value="agricole" checked style="width:auto"> Agricole (A)</label>
+          <label><input type="checkbox" class="zonCheck" value="naturelle" style="width:auto"> Naturelle / forestière (N)</label>
+          <label><input type="checkbox" class="zonCheck" value="autre" style="width:auto"> Autre (U, AU…)</label>
+          <label><input type="checkbox" class="zonCheck" value="inconnu" style="width:auto"> Zonage inconnu</label>
+        </div>
       </div>
       <div class="field site-only">
         <label><input type="checkbox" id="onlyPluKnown" style="width:auto"> Uniquement zone PLU connue</label>
@@ -353,13 +360,34 @@ function exportFavsCsv() {
 // Correspond à ce qu'on appelle couramment ZA (zone d'activités) / ZI (zone industrielle).
 const ZONE_ECO_CODE_RE = /^\d?\s*A?U\s*[EIXYZ]/i;
 const ZONE_ECO_KEYWORDS = /activit|écono|econo|industri|artisan|commerc/i;
+// zones agricoles/naturelles : jamais éco, même si le libellé contient
+// « activités » (ex. « A — Zone réservée aux activités agricoles »)
+const ZONE_NONECO_KEYWORDS = /agricol|naturel|forest/i;
 
 function isZoneEco(row) {
   if (String(row[COL.zoneEco] || '').toLowerCase().startsWith('oui')) return true;
   const z = String(row[COL.plu] || '');
   if (!z) return false;
   const code = z.split('—')[0].trim();
-  return ZONE_ECO_CODE_RE.test(code) || ZONE_ECO_KEYWORDS.test(z);
+  if (ZONE_ECO_CODE_RE.test(code)) return true;
+  if (ZONE_NONECO_KEYWORDS.test(z)) return false;
+  return ZONE_ECO_KEYWORDS.test(z);
+}
+
+// Famille de zonage PLU pour le filtre « Zonage PLU » du menu :
+// 'eco' | 'agricole' | 'naturelle' | 'autre' | 'inconnu'
+// Le CODE PLU explicite prime sur la colonne « Zone éco » (des exports
+// antérieurs au fix du 2026-07-08 marquaient à tort des zones A comme éco).
+function zoningFamily(row) {
+  const z = String(row[COL.plu] || '').trim();
+  const code = z.split('—')[0].trim();
+  if (z && ZONE_ECO_CODE_RE.test(code)) return 'eco';   // UE/UX/UY/UZ/AUx… = éco sûr
+  // A, Aa, Ah… (mais pas AU* = à urbaniser) ou libellé « agricole »
+  if (z && (/agricol/i.test(z) || /^\d?\s*A(?!U)/i.test(code))) return 'agricole';
+  if (z && (/naturel|forest/i.test(z) || /^\d?\s*N/i.test(code))) return 'naturelle';
+  if (isZoneEco(row)) return 'eco';                     // repli : mots-clés / drapeaux source
+  if (!z) return 'inconnu';
+  return 'autre';
 }
 
 // ------------------------------------------------------------------ carte
@@ -458,6 +486,9 @@ function popupHtml(row) {
     <div class="popup-row"><b>Surface :</b> ${fmt(row[COL.surface], ' m²')}</div>
     <div class="popup-row"><b>Poste proche :</b> ${fmt(row[COL.poste])} — ${fmt(row[COL.distPoste], ' km')}</div>
     <div class="popup-row"><b>Capacité poste :</b> ${fmt(row[COL.capacite], ' MW')}</div>
+    ${row['Poste capacité connue'] && String(row[COL.capacite]).includes('vérifier')
+      ? `<div class="popup-row"><b>Capacité connue la + proche :</b> ${row['Poste capacité connue']} — ${fmt(row['Dist. capa connue (km)'], ' km')} (${fmt(row['Capacité connue (MW)'], ' MW')})</div>`
+      : ''}
     <div class="popup-row"><b>Ligne HTB proche :</b> ${fmt(row[COL.distHtb], ' km')}</div>
     <div class="popup-row"><b>Mutabilité PV :</b> ${fmt(row[COL.pv])}</div>
     <div class="popup-row"><b>Pollution :</b> ${fmt(row[COL.pollution])} ${row[COL.pollutionOrigine] ? '(' + row[COL.pollutionOrigine] + ')' : ''}</div>
@@ -498,7 +529,7 @@ function currentFilters() {
     search: document.getElementById('searchBox').value.trim().toLowerCase(),
     dept: document.getElementById('deptSelect').value,
     sources: checked,
-    onlyZoneEco: document.getElementById('onlyZoneEco').checked,
+    zoningFamilies: Array.from(document.querySelectorAll('.zonCheck:checked')).map(c => c.value),
     onlyPlu: document.getElementById('onlyPluKnown').checked,
     excludeFlood: document.getElementById('excludeFlood').checked,
     onlyFavs: document.getElementById('onlyFavs').checked,
@@ -529,7 +560,7 @@ function rowPasses(row, f) {
   if (f.distMax < 20 && dist !== null && dist > f.distMax) return false;
   if (f.dept && extractDept(row[COL.commune]) !== f.dept) return false;
   if (f.sources.length && !f.sources.includes(row[COL.source])) return false;
-  if (f.onlyZoneEco && !isZoneEco(row)) return false;
+  if (f.zoningFamilies.length < 5 && !f.zoningFamilies.includes(zoningFamily(row))) return false;
   if (f.onlyPlu && !row[COL.plu]) return false;
   if (f.excludeFlood && String(row[COL.inondation] || '').startsWith('oui')) return false;
   if (f.search) {
@@ -680,7 +711,7 @@ function updatePriceTotalLabel() {
   });
 }
 
-['scoreMin', 'capaMin', 'priceMax', 'priceTotalMax', 'distMax', 'searchBox', 'deptSelect', 'onlyZoneEco', 'onlyPluKnown', 'excludeFlood', 'onlyFavs'].forEach(id => {
+['scoreMin', 'capaMin', 'priceMax', 'priceTotalMax', 'distMax', 'searchBox', 'deptSelect', 'onlyPluKnown', 'excludeFlood', 'onlyFavs'].forEach(id => {
   document.getElementById(id).addEventListener('input', () => {
     document.getElementById('scoreMinVal').textContent = document.getElementById('scoreMin').value;
     document.getElementById('capaMinVal').textContent = document.getElementById('capaMin').value;
@@ -700,7 +731,7 @@ document.querySelectorAll('.pricePreset').forEach(btn => {
     if (map) renderMarkers();
   });
 });
-document.body.addEventListener('change', (e) => { if (e.target.classList.contains('srcCheck')) renderMarkers(); });
+document.body.addEventListener('change', (e) => { if (e.target.classList.contains('srcCheck') || e.target.classList.contains('zonCheck')) renderMarkers(); });
 
 document.getElementById('resetBtn').addEventListener('click', () => {
   document.getElementById('scoreMin').value = 0;
@@ -710,7 +741,8 @@ document.getElementById('resetBtn').addEventListener('click', () => {
   document.getElementById('distMax').value = 20;
   document.getElementById('searchBox').value = '';
   document.getElementById('deptSelect').value = '';
-  document.getElementById('onlyZoneEco').checked = false;
+  // état par défaut du zonage : éco + agricole visibles, le reste masqué
+  document.querySelectorAll('.zonCheck').forEach(c => c.checked = (c.value === 'eco' || c.value === 'agricole'));
   document.getElementById('onlyPluKnown').checked = false;
   document.getElementById('excludeFlood').checked = false;
   document.getElementById('onlyFavs').checked = false;

@@ -86,10 +86,14 @@
     display: inline-block; padding: 1px 7px; border-radius: 10px; background: #1e7d34; color: #fff;
     font-size: 11px; font-weight: 600; margin-left: 4px;
   }
-  /* bascule site / poste : masque les filtres non pertinents */
+  /* bascule site / poste / entreprise : masque les filtres non pertinents */
   .poste-only { display: none; }
   body.poste-mode .poste-only { display: block; }
   body.poste-mode .site-only { display: none; }
+  .company-only { display: none; }
+  body.company-mode .company-only { display: block; }
+  body.company-mode .poste-only { display: block; }   /* capacité poste utile aussi */
+  body.company-mode .site-only { display: none; }
   #map { position: relative; }
   #spatialBanner {
     position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 1000;
@@ -131,6 +135,10 @@
       <div class="field poste-only">
         <label>Capacité min. au poste (MW) <span class="value" id="capaMinVal">0</span></label>
         <input type="range" id="capaMin" min="0" max="50" value="0" step="1">
+      </div>
+      <div class="field company-only">
+        <label>Terrain libre min. (m²) <span class="value" id="landMinVal">0</span></label>
+        <input type="range" id="landMin" min="0" max="5000" value="0" step="100">
       </div>
       <div class="field site-only">
         <label>Prix €/m² max estimé <span class="value" id="priceMaxVal">illimité</span></label>
@@ -233,16 +241,32 @@ const PCOL = {
   nbSites: "Sites candidats < rayon", nbEco: "dont zone éco (ZA/ZI/UE)",
   lat: "Lat", lon: "Lon", score: "SCORE PROSPECTION",
 };
-let currentMode = 'site';   // 'site' ou 'poste'
+// 3e volet : onglet "Entreprises (cibles)" — prospection autoconsommation
+// (find_companies.py : entreprises énergivores avec terrain libre près des postes)
+const CCOL = {
+  nom: "Entreprise", siren: "SIREN", siret: "SIRET", naf: "Secteur (NAF)",
+  effectif: "Effectif", adresse: "Adresse", commune: "Commune",
+  regime: "ICPE (régime)", rubriques: "Rubriques ICPE", conso: "Conso. estimée",
+  libre: "Terrain libre est. (m²)", parcelle: "Surface parcelle (m²)",
+  poste: "Poste source", distPoste: "Distance poste (km)", capacite: "Capacité poste (MW)",
+  score: "SCORE ENTREPRISE", lat: "Lat", lon: "Lon",
+  annuaire: "Lien annuaire", satellite: "Lien satellite",
+};
+let currentMode = 'site';   // 'site', 'poste' ou 'company'
 let spatialFilter = null;   // {lat, lon, km} — "voir les sites autour d'un poste"
 
 function isPosteSheet(rows) {
   return rows.length > 0 && (PCOL.score in rows[0]) && (PCOL.poste in rows[0]);
 }
-function getLat(row) { return parseFloat(currentMode === 'poste' ? row[PCOL.lat] : row[COL.lat]); }
-function getLon(row) { return parseFloat(currentMode === 'poste' ? row[PCOL.lon] : row[COL.lon]); }
-function getScore(row) { return parseFloat(currentMode === 'poste' ? row[PCOL.score] : row[COL.score]) || 0; }
-function getName(row) { return (currentMode === 'poste' ? row[PCOL.poste] : row[COL.nom]) || 'Site'; }
+function isCompanySheet(rows) {
+  return rows.length > 0 && (CCOL.score in rows[0]) && (CCOL.nom in rows[0]);
+}
+// COL du mode actif (les colonnes lat/lon/score/nom existent dans les 3 schémas)
+function modeCols() { return currentMode === 'poste' ? PCOL : currentMode === 'company' ? CCOL : COL; }
+function getLat(row) { return parseFloat(row[modeCols().lat]); }
+function getLon(row) { return parseFloat(row[modeCols().lon]); }
+function getScore(row) { return parseFloat(row[modeCols().score]) || 0; }
+function getName(row) { return (currentMode === 'poste' ? row[PCOL.poste] : row[modeCols().nom]) || 'Site'; }
 
 function haversineKm(la1, lo1, la2, lo2) {
   const R = 6371, r = Math.PI / 180;
@@ -257,8 +281,9 @@ let favorites = {};
 try { favorites = JSON.parse(localStorage.getItem(FAV_KEY) || '{}'); } catch (e) { favorites = {}; }
 
 function rowId(row) {
-  // préfixe le type pour ne pas mélanger favoris "site" et "poste"
+  // préfixe le type pour ne pas mélanger favoris "site", "poste" et "entreprise"
   if (PCOL.score in row) return `P|${row[PCOL.lat]}|${row[PCOL.lon]}|${row[PCOL.poste]}`;
+  if (CCOL.score in row) return `E|${row[CCOL.siret] || row[CCOL.nom]}|${row[CCOL.lat]}|${row[CCOL.lon]}`;
   return `${row[COL.lat]}|${row[COL.lon]}|${row[COL.nom]}`;
 }
 function saveFavs() { localStorage.setItem(FAV_KEY, JSON.stringify(favorites)); }
@@ -287,8 +312,9 @@ window.zoomFav = function (idEnc) {
   const fav = favorites[id];
   if (!fav || !map) return;
   const r = fav.row;
-  const lat = parseFloat((PCOL.score in r) ? r[PCOL.lat] : r[COL.lat]);
-  const lon = parseFloat((PCOL.score in r) ? r[PCOL.lon] : r[COL.lon]);
+  // postes ET entreprises utilisent les colonnes "Lat"/"Lon", les sites "Lat (°)"/"Lon (°)"
+  const lat = parseFloat((PCOL.score in r || CCOL.score in r) ? r["Lat"] : r[COL.lat]);
+  const lon = parseFloat((PCOL.score in r || CCOL.score in r) ? r["Lon"] : r[COL.lon]);
   if (!Number.isFinite(lat)) return;
   map.setView([lat, lon], 16);
   const marker = markersById.get(id);
@@ -321,9 +347,12 @@ function renderFavList() {
     const r = favorites[id].row;
     const idEnc = encodeURIComponent(id);
     const isPoste = (PCOL.score in r);
-    const icon = isPoste ? '🔌' : '⭐';
-    const name = isPoste ? (r[PCOL.poste] || 'Poste') : (r[COL.nom] || 'Site');
-    const sub = isPoste ? (num(r[PCOL.capacite]) != null ? r[PCOL.capacite] + ' MW' : 'poste') : (r[COL.commune] || '');
+    const isCompany = (CCOL.score in r);
+    const icon = isPoste ? '🔌' : isCompany ? '🏭' : '⭐';
+    const name = isPoste ? (r[PCOL.poste] || 'Poste')
+      : isCompany ? (r[CCOL.nom] || 'Entreprise') : (r[COL.nom] || 'Site');
+    const sub = isPoste ? (num(r[PCOL.capacite]) != null ? r[PCOL.capacite] + ' MW' : 'poste')
+      : isCompany ? (r[CCOL.commune] || 'entreprise') : (r[COL.commune] || '');
     return `<div class="fav-item">
       <span class="fav-name" title="${String(name).replace(/"/g, '&quot;')} — ${sub}"
             onclick="window.zoomFav('${idEnc}')">${icon} ${name} <span style="color:#889">· ${sub}</span></span>
@@ -346,7 +375,7 @@ function exportFavsCsv() {
   const lines = [cols.map(esc).join(';')];
   for (const id of ids) {
     const r = favorites[id].row;
-    const type = (PCOL.score in r) ? 'Poste' : 'Site';
+    const type = (PCOL.score in r) ? 'Poste' : (CCOL.score in r) ? 'Entreprise' : 'Site';
     lines.push([esc(type), ...colSet.map(c => esc(r[c]))].join(';'));
   }
   const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
@@ -479,6 +508,25 @@ function popupHtml(row) {
       ${favBtn}
     `;
   }
+  if (CCOL.score in row) {  // ---- fiche ENTREPRISE (prospection autoconsommation) ----
+    const score = num(row[CCOL.score]) || 0;
+    const annuaire = row[CCOL.annuaire];
+    return `
+      <div class="popup-title">🏭 ${row[CCOL.nom] || 'Entreprise'}</div>
+      <div class="popup-row">${row[CCOL.commune] || ''} · ${row[CCOL.naf] || ''}</div>
+      <div class="popup-row"><span class="popup-score" style="background:${scoreColor(score)}">Score ${score.toFixed(1)}</span></div>
+      <div class="popup-row"><b>Conso. estimée :</b> ${fmt(row[CCOL.conso])}</div>
+      <div class="popup-row"><b>Effectif :</b> ${fmt(row[CCOL.effectif])}</div>
+      <div class="popup-row"><b>ICPE :</b> ${fmt(row[CCOL.regime])} ${row[CCOL.rubriques] ? '(' + row[CCOL.rubriques] + ')' : ''}</div>
+      <div class="popup-row"><b>Terrain libre est. :</b> ${fmt(row[CCOL.libre], ' m²')} (parcelle ${fmt(row[CCOL.parcelle], ' m²')})</div>
+      <div class="popup-row"><b>Poste :</b> ${fmt(row[CCOL.poste])} — ${fmt(row[CCOL.distPoste], ' km')} (${fmt(row[CCOL.capacite], ' MW')})</div>
+      <div class="popup-row"><b>Adresse :</b> ${fmt(row[CCOL.adresse])}</div>
+      ${annuaire ? `<a class="popup-link" href="${annuaire}" target="_blank" rel="noopener">🗂 Fiche annuaire-entreprises →</a>` : ''}
+      <a class="popup-link" href="https://www.google.com/maps/search/?api=1&query=${getLat(row)},${getLon(row)}"
+         target="_blank" rel="noopener">🛰 Vue satellite (terrain) →</a>
+      ${favBtn}
+    `;
+  }
   // ---- fiche SITE ----
   const score = num(row[COL.score]) || 0;
   const url = row[COL.url];
@@ -533,6 +581,7 @@ function currentFilters() {
     priceTotalMax: Number(document.getElementById('priceTotalMax').value),
     distMax: Number(document.getElementById('distMax').value),
     capaMin: Number(document.getElementById('capaMin').value),
+    landMin: Number(document.getElementById('landMin').value),
     search: document.getElementById('searchBox').value.trim().toLowerCase(),
     dept: document.getElementById('deptSelect').value,
     sources: checked,
@@ -552,6 +601,19 @@ function rowPasses(row, f) {
     const capa = num(row[PCOL.capacite]);
     if (f.capaMin > 0 && (capa === null || capa < f.capaMin)) return false;
     if (f.search && !String(row[PCOL.poste] || '').toLowerCase().includes(f.search)) return false;
+    return true;
+  }
+
+  if (currentMode === 'company') {
+    const capa = num(row[CCOL.capacite]);
+    if (f.capaMin > 0 && (capa === null || capa < f.capaMin)) return false;
+    // "Terrain libre" peut être "12345", "12345 (brut, …)" ou "n.d." → num() extrait le nombre
+    const libre = num(row[CCOL.libre]);
+    if (f.landMin > 0 && (libre === null || libre < f.landMin)) return false;
+    if (f.search) {
+      const hay = `${row[CCOL.nom] || ''} ${row[CCOL.commune] || ''} ${row[CCOL.naf] || ''} ${row[CCOL.poste] || ''}`.toLowerCase();
+      if (!hay.includes(f.search)) return false;
+    }
     return true;
   }
 
@@ -595,12 +657,13 @@ function renderMarkers() {
     const id = rowId(row);
     const isFav = !!favorites[id];
     const isPoste = currentMode === 'poste';
+    const isCompany = currentMode === 'company';
     const marker = L.circleMarker([lat, lon], { _score: score });
     marker.setStyle({
-      radius: isFav ? 9 : (isPoste ? 7 : 6),
+      radius: isFav ? 9 : (isPoste || isCompany ? 7 : 6),
       fillColor: scoreColor(score),
-      color: isFav ? '#c9a100' : (isPoste ? '#1F3864' : '#fff'),
-      weight: isFav ? 3 : (isPoste ? 2 : 1),
+      color: isFav ? '#c9a100' : (isPoste ? '#1F3864' : isCompany ? '#1e7d34' : '#fff'),
+      weight: isFav ? 3 : (isPoste || isCompany ? 2 : 1),
       fillOpacity: 0.9,
     });
     marker.bindPopup(popupHtml(row), { maxWidth: 320 });
@@ -611,13 +674,17 @@ function renderMarkers() {
   }
   clusterGroup.addLayers(markers);
   document.getElementById('statCount').textContent = count.toLocaleString('fr-FR');
-  document.getElementById('statLabel').textContent = currentMode === 'poste' ? 'postes affichés' : 'sites affichés';
+  document.getElementById('statLabel').textContent = currentMode === 'poste' ? 'postes affichés'
+    : currentMode === 'company' ? 'entreprises affichées' : 'sites affichés';
 }
 
 // bascule vers les sites et restreint au rayon autour d'un poste
 window.voirSitesAutour = function (lat, lon, nameEnc) {
   const sitesSheet = workbook.SheetNames.includes('Toutes (classées)') ? 'Toutes (classées)'
-    : workbook.SheetNames.find(n => !isPosteSheet(XLSX.utils.sheet_to_json(workbook.Sheets[n], { defval: '' })));
+    : workbook.SheetNames.find(n => {
+        const rows = XLSX.utils.sheet_to_json(workbook.Sheets[n], { defval: '' });
+        return !isPosteSheet(rows) && !isCompanySheet(rows);
+      });
   if (!sitesSheet) return;
   spatialFilter = { lat, lon, km: 5 };
   document.getElementById('sheetSelect').value = sitesSheet;
@@ -637,8 +704,9 @@ function clearSpatialFilter() {
 function loadSheet(name) {
   const ws = workbook.Sheets[name];
   allRows = XLSX.utils.sheet_to_json(ws, { defval: '' });
-  currentMode = isPosteSheet(allRows) ? 'poste' : 'site';
+  currentMode = isPosteSheet(allRows) ? 'poste' : isCompanySheet(allRows) ? 'company' : 'site';
   document.body.classList.toggle('poste-mode', currentMode === 'poste');
+  document.body.classList.toggle('company-mode', currentMode === 'company');
   rowsById.clear();
   for (const row of allRows) rowsById.set(rowId(row), row);
   populateFilterOptions(allRows);
@@ -704,8 +772,10 @@ document.getElementById('sheetSelect').addEventListener('change', (e) => {
   clearSpatialFilter();  // change d'onglet = on annule le zoom "autour d'un poste"
   loadSheet(e.target.value);
   // libellés adaptés au mode
-  document.getElementById('scoreLabel').textContent = currentMode === 'poste' ? 'Score prospection min.' : 'Score minimum';
-  document.getElementById('searchLabel').textContent = currentMode === 'poste' ? 'Recherche (nom du poste)' : 'Recherche (commune, nom)';
+  document.getElementById('scoreLabel').textContent = currentMode === 'poste' ? 'Score prospection min.'
+    : currentMode === 'company' ? 'Score entreprise min.' : 'Score minimum';
+  document.getElementById('searchLabel').textContent = currentMode === 'poste' ? 'Recherche (nom du poste)'
+    : currentMode === 'company' ? 'Recherche (entreprise, commune, secteur)' : 'Recherche (commune, nom)';
 });
 document.getElementById('exportFavs').addEventListener('click', exportFavsCsv);
 document.getElementById('spatialClear').addEventListener('click', clearSpatialFilter);
@@ -722,10 +792,12 @@ function updatePriceTotalLabel() {
   });
 }
 
-['scoreMin', 'capaMin', 'priceMax', 'priceTotalMax', 'distMax', 'searchBox', 'deptSelect', 'onlyCapaKnown', 'onlyPluKnown', 'excludeFlood', 'onlyFavs'].forEach(id => {
+['scoreMin', 'capaMin', 'landMin', 'priceMax', 'priceTotalMax', 'distMax', 'searchBox', 'deptSelect', 'onlyCapaKnown', 'onlyPluKnown', 'excludeFlood', 'onlyFavs'].forEach(id => {
   document.getElementById(id).addEventListener('input', () => {
     document.getElementById('scoreMinVal').textContent = document.getElementById('scoreMin').value;
     document.getElementById('capaMinVal').textContent = document.getElementById('capaMin').value;
+    const lm = Number(document.getElementById('landMin').value);
+    document.getElementById('landMinVal').textContent = lm > 0 ? '≥ ' + lm.toLocaleString('fr-FR') + ' m²' : '0';
     const pm = Number(document.getElementById('priceMax').value);
     document.getElementById('priceMaxVal').textContent = pm >= 2000 ? 'illimité' : pm + ' €/m²';
     const dm = Number(document.getElementById('distMax').value);
@@ -747,6 +819,8 @@ document.body.addEventListener('change', (e) => { if (e.target.classList.contain
 document.getElementById('resetBtn').addEventListener('click', () => {
   document.getElementById('scoreMin').value = 0;
   document.getElementById('capaMin').value = 0;
+  document.getElementById('landMin').value = 0;
+  document.getElementById('landMinVal').textContent = '0';
   document.getElementById('priceMax').value = 2000;
   document.getElementById('priceTotalMax').value = 1000000;
   document.getElementById('distMax').value = 20;

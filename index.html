@@ -474,6 +474,8 @@ function popupHtml(row) {
       <button class="fav-btn" style="border-color:#1F3864;background:#eef3fb;color:#1F3864"
         onclick="window.voirSitesAutour(${getLat(row)},${getLon(row)},'${encodeURIComponent(row[PCOL.poste] || '')}')">
         📍 Voir les sites autour (5 km)</button>
+      <a class="popup-link" href="https://www.google.com/maps/search/?api=1&query=${getLat(row)},${getLon(row)}"
+         target="_blank" rel="noopener">📍 Ouvrir dans Google Maps →</a>
       ${favBtn}
     `;
   }
@@ -499,6 +501,8 @@ function popupHtml(row) {
     <div class="popup-row"><b>Risque inondation :</b> ${fmt(row[COL.inondation])}</div>
     <div class="popup-row"><b>Espaces protégés :</b> ${fmt(row[COL.proteges])}</div>
     ${url ? `<a class="popup-link" href="${url}" target="_blank" rel="noopener">Voir la fiche source →</a>` : ''}
+    <a class="popup-link" href="https://www.google.com/maps/search/?api=1&query=${getLat(row)},${getLon(row)}"
+       target="_blank" rel="noopener">📍 Ouvrir dans Google Maps →</a>
     <button class="fav-btn ${isFav ? 'is-fav' : ''}" onclick="window.toggleFav('${idEnc}')">
       ${isFav ? '★ Retirer des favoris' : '☆ Ajouter aux favoris'}</button>
   `;

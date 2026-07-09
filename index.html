@@ -177,6 +177,9 @@
         </div>
       </div>
       <div class="field site-only">
+        <label><input type="checkbox" id="onlyCapaKnown" style="width:auto"> <b>Capacité poste connue uniquement</b> (Caparéseau)</label>
+      </div>
+      <div class="field site-only">
         <label><input type="checkbox" id="onlyPluKnown" style="width:auto"> Uniquement zone PLU connue</label>
       </div>
       <div class="field site-only">
@@ -530,6 +533,7 @@ function currentFilters() {
     dept: document.getElementById('deptSelect').value,
     sources: checked,
     zoningFamilies: Array.from(document.querySelectorAll('.zonCheck:checked')).map(c => c.value),
+    onlyCapaKnown: document.getElementById('onlyCapaKnown').checked,
     onlyPlu: document.getElementById('onlyPluKnown').checked,
     excludeFlood: document.getElementById('excludeFlood').checked,
     onlyFavs: document.getElementById('onlyFavs').checked,
@@ -561,6 +565,9 @@ function rowPasses(row, f) {
   if (f.dept && extractDept(row[COL.commune]) !== f.dept) return false;
   if (f.sources.length && !f.sources.includes(row[COL.source])) return false;
   if (f.zoningFamilies.length < 5 && !f.zoningFamilies.includes(zoningFamily(row))) return false;
+  // « Capacité poste connue » = la colonne contient un nombre (sinon c'est
+  // "à vérifier (Caparéseau)" ou vide → capacité inconnue)
+  if (f.onlyCapaKnown && num(row[COL.capacite]) === null) return false;
   if (f.onlyPlu && !row[COL.plu]) return false;
   if (f.excludeFlood && String(row[COL.inondation] || '').startsWith('oui')) return false;
   if (f.search) {
@@ -711,7 +718,7 @@ function updatePriceTotalLabel() {
   });
 }
 
-['scoreMin', 'capaMin', 'priceMax', 'priceTotalMax', 'distMax', 'searchBox', 'deptSelect', 'onlyPluKnown', 'excludeFlood', 'onlyFavs'].forEach(id => {
+['scoreMin', 'capaMin', 'priceMax', 'priceTotalMax', 'distMax', 'searchBox', 'deptSelect', 'onlyCapaKnown', 'onlyPluKnown', 'excludeFlood', 'onlyFavs'].forEach(id => {
   document.getElementById(id).addEventListener('input', () => {
     document.getElementById('scoreMinVal').textContent = document.getElementById('scoreMin').value;
     document.getElementById('capaMinVal').textContent = document.getElementById('capaMin').value;
@@ -743,6 +750,7 @@ document.getElementById('resetBtn').addEventListener('click', () => {
   document.getElementById('deptSelect').value = '';
   // état par défaut du zonage : éco + agricole visibles, le reste masqué
   document.querySelectorAll('.zonCheck').forEach(c => c.checked = (c.value === 'eco' || c.value === 'agricole'));
+  document.getElementById('onlyCapaKnown').checked = false;
   document.getElementById('onlyPluKnown').checked = false;
   document.getElementById('excludeFlood').checked = false;
   document.getElementById('onlyFavs').checked = false;
